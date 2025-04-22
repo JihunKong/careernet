@@ -101,23 +101,67 @@ class CareerNetAPI:
         """진로심리검사 문항 조회"""
         # 커리어넷 API 문서에 따라 정확한 URL 사용
         
+        # 중요: API 키는 'apikey'가 아닌 'apiKey'로 전달해야 함
+        
         # 1. v1 API 시도 - 문서에 명시된 정확한 URL
-        v1_url = f"{self.base_url}inspct/openapi/test/questions"
-        params = {"apikey": self.api_key, "q": test_id}
-        
+        # https://www.career.go.kr/inspct/openapi/test/questions?apikey=인증키&q=심리검사번호
         print(f"\n==== 진로심리검사 문항 요청 (v1) ====")
-        result = self._make_request(v1_url, params=params)
+        print(f"API 키: {self.api_key}")
+        print(f"검사 ID: {test_id}")
         
-        # v1 API 실패시 v2 API 시도
-        if "error" in result or not result.get("RESULT"):
+        # 직접 요청 시도 (requests 라이브러리 사용)
+        v1_url = f"https://www.career.go.kr/inspct/openapi/test/questions"
+        params = {"apiKey": self.api_key, "q": test_id}  # apiKey로 변경
+        
+        try:
+            print(f"\n전체 URL: {v1_url}?apiKey={self.api_key}&q={test_id}")
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+                "Accept": "application/json",
+                "Content-Type": "application/json"
+            }
+            
+            response = requests.get(v1_url, params=params, headers=headers, timeout=10)
+            print(f"API 응답 상태 코드: {response.status_code}")
+            print(f"API 응답 헤더: {response.headers}")
+            
+            # 응답 본문 출력 (디버깅용)
+            response_text = response.text[:500]  # 처음 500자만 출력
+            print(f"API 응답 본문 (일부): {response_text}")
+            
+            if response.status_code == 200:
+                try:
+                    result = response.json()
+                    if "RESULT" in result:
+                        return result
+                except Exception as json_error:
+                    print(f"JSON 파싱 오류: {json_error}")
+            
+            # v1 API 실패시 v2 API 시도
             print(f"\n==== 진로심리검사 문항 요청 (v2) ====")
-            v2_url = f"{self.base_url}inspct/openapi/v2/test"
+            v2_url = "https://www.career.go.kr/inspct/openapi/v2/test"
             v2_params = {"apikey": self.api_key, "q": test_id}
-            result = self._make_request(v2_url, params=v2_params)
-        
-        # 디버깅을 위한 로그 추가
-        print(f"\n최종 API 응답: {result}")
-        return result
+            
+            print(f"\n전체 URL: {v2_url}?apikey={self.api_key}&q={test_id}")
+            v2_response = requests.get(v2_url, params=v2_params, headers=headers, timeout=10)
+            print(f"v2 API 응답 상태 코드: {v2_response.status_code}")
+            
+            v2_text = v2_response.text[:500]
+            print(f"v2 API 응답 본문 (일부): {v2_text}")
+            
+            if v2_response.status_code == 200:
+                try:
+                    result = v2_response.json()
+                    return result
+                except Exception as json_error:
+                    print(f"v2 JSON 파싱 오류: {json_error}")
+            
+            # 두 API 모두 실패한 경우
+            return {"error": "API 요청 실패"}
+            
+        except Exception as e:
+            print(f"API 요청 오류: {e}")
+            return {"error": str(e)}
     
     def submit_psychological_test(self, test_id, answers):
         """진로심리검사 결과 요청"""
