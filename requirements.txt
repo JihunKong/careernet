@@ -1,4 +1,9 @@
-streamlit
-firebase-admin
-pyrebase4
-requests
+streamlit>=1.27.0
+firebase-admin>=6.2.0
+pyrebase4>=4.7.0
+requests>=2.31.0
+plotly>=5.18.0
+pkg_resources>=0.0.0
+gcloud>=0.18.3
+python-jwt>=4.0.0
+deprecation>=2.1.0
