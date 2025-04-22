@@ -2,31 +2,42 @@ import requests
 import json
 
 class CareerNetAPI:
-    """커리어넷 API 호출을 담당하는 클래스"""
-    
-    BASE_URL = "https://www.career.go.kr/cnet/openapi/api"
+    """커리어넷 API 요청 클래스"""
     
     def __init__(self, api_key):
         self.api_key = api_key
+        # 기본 URL 수정 (v1 API용)
+        self.base_url = "https://www.career.go.kr/inspct/openapi/"
+        # v2 API용 URL
+        self.base_url_v2 = "https://www.career.go.kr/inspct/openapi/v2/"
     
-    def _make_request(self, endpoint, params=None, method="GET", data=None):
-        """API 요청 실행"""
+    def _make_request(self, endpoint, params=None, method="GET", data=None, use_v2=False):
+        """API 요청 처리"""
         if params is None:
             params = {}
         
-        # API 키 추가
-        params["apiKey"] = self.api_key
+        # API 키 추가 (v1 API는 apikey, v2 API는 apiKey)
+        if use_v2:
+            params["apikey"] = self.api_key
+            base = self.base_url_v2
+        else:
+            params["apikey"] = self.api_key
+            base = self.base_url
         
-        url = f"{self.BASE_URL}/{endpoint}"
+        url = f"{base}{endpoint}"
         
         try:
+            print(f"API 요청 URL: {url}")
+            print(f"API 요청 파라미터: {params}")
+            
             if method == "GET":
                 response = requests.get(url, params=params)
             elif method == "POST":
                 response = requests.post(url, params=params, json=data)
             else:
-                raise ValueError(f"지원하지 않는 HTTP 메소드: {method}")
+                raise ValueError(f"Unsupported HTTP method: {method}")
             
+            print(f"API 응답 상태 코드: {response.status_code}")
             response.raise_for_status()
             return response.json()
         except requests.exceptions.RequestException as e:
@@ -35,20 +46,23 @@ class CareerNetAPI:
     
     # 진로심리검사 관련 API
     def get_psychological_tests(self):
-        """진로심리검사 목록 조회"""
-        return self._make_request("psychTest")
+        """진로심리검사 목록 조회 (v2 API)"""
+        return self._make_request("tests", use_v2=True)
     
     def get_psychological_test_questions(self, test_id):
         """진로심리검사 문항 조회"""
         # 커리어넷 API 문서에 따라 엔드포인트 수정
-        # 1. 기존 방식 시도
-        result = self._make_request(f"psychTest/{test_id}/questions")
-        if "error" in result or not result.get("questions"):
-            # 2. 대체 방식 시도 (검사 유형 코드 사용)
-            result = self._make_request(f"inspct/question/{test_id}")
-            if "error" in result or not result.get("questions"):
-                # 3. 또 다른 대체 방식 시도
-                result = self._make_request(f"inspct/question", params={"seq": test_id})
+        # 1. v1 API 방식 시도 - 문서에 명시된 방식
+        result = self._make_request("test/questions", params={"q": test_id})
+        if "error" in result or not result.get("RESULT"):
+            # 2. v2 API 방식 시도
+            result = self._make_request("test", params={"q": test_id}, use_v2=True)
+            if "error" in result or not result.get("result"):
+                # 3. 다른 가능한 엔드포인트 시도
+                result = self._make_request(f"test/questions/{test_id}")
+                if "error" in result or not result.get("RESULT") and not result.get("questions"):
+                    # 4. 또 다른 대체 방식 시도
+                    result = self._make_request(f"inspct/question", params={"seq": test_id})
         
         # 디버깅을 위한 로그 추가
         print(f"API 응답: {result}")
