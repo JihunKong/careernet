@@ -1,23 +1,29 @@
-import streamlit as st
-import requests
+import os
 import json
-import pandas as pd
+import requests
 from datetime import datetime
+
+import streamlit as st
+
+# 페이지 설정 (반드시 다른 st 명령어보다 먼저 호출해야 함)
+st.set_page_config(
+    page_title="나만의 진로 탐색 로드맵",
+    page_icon="🧭",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+import pyrebase
 import firebase_admin
 from firebase_admin import credentials, firestore
 from firebase_admin import auth as firebase_auth
-import pyrebase
-import os
-
-# 폴더 구조 확인 및 생성
-if not os.path.exists('config'):
-    os.makedirs('config')
 
 # Firebase 설정
 firebase_config = {
     "apiKey": "AIzaSyBUd8mS_PlgU6yBoqliAP93akYIHpcJCBc",
     "authDomain": "careernet-b43ec.firebaseapp.com",
     "projectId": "careernet-b43ec",
+    "databaseURL": "https://careernet-b43ec-default-rtdb.firebaseio.com",
     "storageBucket": "careernet-b43ec.firebasestorage.app",
     "messagingSenderId": "318261988853",
     "appId": "1:318261988853:web:8cf1f28fd438e497e524bc"
@@ -27,28 +33,49 @@ firebase_config = {
 if 'firebase_admin_initialized' not in st.session_state:
     try:
         # Firebase Admin SDK 초기화 (Streamlit secrets에서 가져오기)
-        firebase_creds = st.secrets["firebase"]
-        cred = credentials.Certificate(firebase_creds)
-        firebase_admin.initialize_app(cred)
-        st.session_state.db = firestore.client()
-        st.session_state.firebase_admin_initialized = True
+        firebase_creds = dict(st.secrets["firebase"])
+        
+        # 개인 키 형식 확인 및 수정
+        if isinstance(firebase_creds["private_key"], str):
+            firebase_creds["private_key"] = firebase_creds["private_key"].replace('\\n', '\n')
+        
+        # 이미 초기화된 앱이 있는지 확인
+        try:
+            app = firebase_admin.get_app()
+            st.session_state.db = firestore.client()
+            st.session_state.firebase_admin_initialized = True
+        except ValueError:
+            # 앱이 초기화되지 않은 경우 초기화
+            cred = credentials.Certificate(firebase_creds)
+            firebase_admin.initialize_app(cred)
+            st.session_state.db = firestore.client()
+            st.session_state.firebase_admin_initialized = True
     except Exception as e:
         st.error(f"Firebase Admin SDK 초기화 오류: {e}")
 
 # 커리어넷 API 관련 모듈 가져오기
-from utils.api_requests import CareerNetAPI
-from components.psychological_tests import PsychologicalTests
-from components.job_explorer import JobExplorer
-from components.school_department_info import SchoolDepartmentInfo
-from components.counseling_cases import CounselingCases
+try:
+    from utils.api_requests import CareerNetAPI
+    from components.psychological_tests import PsychologicalTests
+    from components.job_explorer import JobExplorer
+    from components.school_department_info import SchoolDepartmentInfo
+    from components.counseling_cases import CounselingCases
+except ImportError as e:
+    st.error(f"모듈 가져오기 오류: {e}")
 
 # Pyrebase 초기화 (인증용)
 firebase = pyrebase.initialize_app(firebase_config)
 auth = firebase.auth()
 
 # 커리어넷 API 키 (Streamlit secrets에서 가져오기)
-CAREER_API_KEY = st.secrets["careernet"]["api_key"]
-career_api = CareerNetAPI(CAREER_API_KEY)
+try:
+    CAREER_API_KEY = st.secrets["careernet"]["api_key"]
+    career_api = CareerNetAPI(CAREER_API_KEY)
+except Exception as e:
+    st.warning(f"API 키 설정 오류: {e}. 직접 설정한 API 키를 사용합니다.")
+    # 직접 API 키 설정 (secrets.toml에서 로드 실패 시 사용)
+    CAREER_API_KEY = "90747c26b8d3bc27dc18e2cfdf49f8b7"
+    career_api = CareerNetAPI(CAREER_API_KEY)
 
 # 세션 상태 초기화
 if 'user_info' not in st.session_state:
@@ -99,46 +126,65 @@ def login_page():
                         'data': user_data
                     }
                     st.success("로그인 성공!")
-                    st.experimental_rerun()
+                    st.rerun()
                 else:
                     st.error("Firebase 초기화 오류. 서비스 계정 키를 확인해주세요.")
             except Exception as e:
                 st.error(f"로그인 실패: {e}")
     
     with tab2:
-        new_email = st.text_input("이메일", key="signup_email")
-        new_password = st.text_input("비밀번호", type="password", key="signup_password")
+        new_email = st.text_input("이메일", key="signup_email", placeholder="example@example.com")
+        new_password = st.text_input("비밀번호", type="password", key="signup_password", help="6자 이상의 비밀번호를 입력하세요")
         new_name = st.text_input("이름")
         
         if st.button("회원가입"):
-            try:
-                # Firebase Authentication으로 사용자 생성
-                user = auth.create_user_with_email_and_password(new_email, new_password)
-                
-                # 초기 사용자 데이터 생성
-                user_data = {
-                    'name': new_name,
-                    'grade': '',
-                    'interests': [],
-                    'test_results': {},
-                    'saved_jobs': [],
-                    'saved_schools': []
-                }
-                
-                # Firestore에 사용자 정보 저장
-                if 'firebase_admin_initialized' in st.session_state:
-                    st.session_state.db.collection("users").document(user['localId']).set(user_data)
-                    st.success("회원가입 성공! 이제 로그인할 수 있습니다.")
-                else:
-                    st.error("Firebase 초기화 오류. 서비스 계정 키를 확인해주세요.")
-            except Exception as e:
-                st.error(f"회원가입 실패: {e}")
+            # 이메일 형식 검증
+            import re
+            email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+            
+            if not re.match(email_pattern, new_email):
+                st.error("유효한 이메일 주소를 입력해주세요.")
+            elif len(new_password) < 6:
+                st.error("비밀번호는 최소 6자 이상이어야 합니다.")
+            elif not new_name.strip():
+                st.error("이름을 입력해주세요.")
+            else:
+                try:
+                    # Firebase Authentication으로 사용자 생성
+                    user = auth.create_user_with_email_and_password(new_email, new_password)
+                    
+                    # 초기 사용자 데이터 생성
+                    user_data = {
+                        'name': new_name,
+                        'grade': '',
+                        'interests': [],
+                        'test_results': {},
+                        'saved_jobs': [],
+                        'saved_schools': []
+                    }
+                    
+                    # Firestore에 사용자 정보 저장
+                    if 'firebase_admin_initialized' in st.session_state:
+                        st.session_state.db.collection("users").document(user['localId']).set(user_data)
+                        st.success("회원가입 성공! 이제 로그인할 수 있습니다.")
+                    else:
+                        st.error("Firebase 초기화 오류. 서비스 계정 키를 확인해주세요.")
+                except Exception as e:
+                    error_message = str(e)
+                    if "INVALID_EMAIL" in error_message:
+                        st.error("유효하지 않은 이메일 형식입니다.")
+                    elif "EMAIL_EXISTS" in error_message:
+                        st.error("이미 등록된 이메일입니다.")
+                    elif "WEAK_PASSWORD" in error_message:
+                        st.error("비밀번호가 너무 약합니다. 6자 이상의 비밀번호를 사용하세요.")
+                    else:
+                        st.error(f"회원가입 실패: {e}")
 
 # 로그아웃 함수
 def logout():
     st.session_state.user_info = None
     st.success("로그아웃 되었습니다.")
-    st.experimental_rerun()
+    st.rerun()
 
 # 메인 앱
 def main_app():
@@ -312,10 +358,4 @@ def main():
         login_page()
 
 if __name__ == "__main__":
-    st.set_page_config(
-        page_title="나만의 진로 탐색 로드맵",
-        page_icon="🧭",
-        layout="wide",
-        initial_sidebar_state="expanded"
-    )
     main()
