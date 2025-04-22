@@ -40,7 +40,19 @@ class CareerNetAPI:
     
     def get_psychological_test_questions(self, test_id):
         """진로심리검사 문항 조회"""
-        return self._make_request(f"psychTest/{test_id}/questions")
+        # 커리어넷 API 문서에 따라 엔드포인트 수정
+        # 1. 기존 방식 시도
+        result = self._make_request(f"psychTest/{test_id}/questions")
+        if "error" in result or not result.get("questions"):
+            # 2. 대체 방식 시도 (검사 유형 코드 사용)
+            result = self._make_request(f"inspct/question/{test_id}")
+            if "error" in result or not result.get("questions"):
+                # 3. 또 다른 대체 방식 시도
+                result = self._make_request(f"inspct/question", params={"seq": test_id})
+        
+        # 디버깅을 위한 로그 추가
+        print(f"API 응답: {result}")
+        return result
     
     def submit_psychological_test(self, test_id, answers):
         """진로심리검사 결과 요청"""
